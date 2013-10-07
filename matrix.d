@@ -16,58 +16,114 @@ limitations under the License.
 
 module matrix;
 
-import std.stdio;
+import std.traits : isNumeric;
 
-pure T[][] mul(T)(T[][] A, T[][] B) {
-    size_t AH = A.length;
-    size_t AW = A[0].length;
-    foreach (a; A){
-        assert(a.length == AW);
+struct Matrix(T, int rows, int cols) {
+    T[rows * cols] v;
+
+    this(ref Matrix!(T, rows, cols) A) {
+        foreach (i; 0 .. v.length) {
+            v[i] = A.v[i];
+        }
     }
-    size_t BH = B.length;
-    size_t BW = B[0].length;
-    foreach (b; B){
-        assert(b.length == BW);
-    }
-    assert(AW == BH);
-    T[][] C;
-    C.length = AH;
-    foreach (i; 0 .. AH) {
-        C[i].length = BW;
-        foreach (j; 0 .. BW) {
-            C[i][j] = 0;
-            foreach (k; 0 .. AW) {
-                C[i][j] += A[i][k] * B[k][j];
+
+    this(T[rows][cols] A) {
+        foreach (i; 0 .. rows) {
+            foreach (j; 0 .. cols) {
+                v[j * rows + i] = A[i][j];
             }
         }
     }
-    return C;
-}
 
-pure T[] mul(T)(T[] a, T[][] B) {
-    T[][] A = [a];
-    T[][] mres = mul(A, B);
-    return mres[0];
-}
-
-pure T[] mul(T)(T[][] A, T[] b) {
-    return mul(b, transpose(A));
-}
-
-pure T[][] transpose(T)(T[][] A) {
-    T[][] C;
-    C.length = A[0].length;
-    foreach (i; 0 .. A[0].length) {
-        C[i].length = A.length;
-        foreach (j; 0 .. A.length) {
-            C[i][j] = A[j][i];
+    this(T[rows * cols] A) {
+        foreach (i; 0 .. v.length) {
+            v[i] = A[i];
         }
     }
-    return C;
+
+    Matrix!(T, rows, cols) opUnary(string op)() if (op == "+" || op == "-") {
+        auto res = Matrix!(T, rows, cols)();
+
+        foreach (i; 0 .. v.length) {
+            res.v[i] = mixin(op~"v[i]");
+        }
+
+        return res;
+    }
+
+    Matrix!(T, rows, cols) opBinary(string op)(ref Matrix!(T, rows, cols) A) if (op == "+" || op == "-") {
+        auto res = Matrix!(T, rows, cols)();
+
+        foreach (i; 0 .. v.length) {
+            res.v[i] = mixin("v[i] "~op~" A.v[i]");
+        }
+
+        return res;
+    }
+
+    Matrix!(T, rows, cols) opOpAssign(string op)(ref Matrix!(T, rows, cols) A) if (op == "+" || op == "-") {
+        this = opBinary!op(A);
+
+        return this;
+    }
+
+    // Multiplication of matrix by matrix or matrix by vector
+    Matrix!(T, rows, A_cols) opBinary(string op, int A_cols)(ref Matrix!(T, cols, A_cols) A) if (op == "*") {
+        auto res = Matrix!(T, rows, A_cols)();
+
+        foreach (i; 0 .. rows) {
+            foreach (j; 0 .. A_cols) {
+                res.v[j * rows + i] = 0;
+                foreach (k; 0 .. cols) {
+                    res.v[j * rows + i] += v[k * rows + i] * A.v[j * cols + k];
+                }
+            }
+        }
+
+        return res;
+    }
+
+    Matrix!(T, rows, cols) opBinary(string op, S)(S s) if ((op == "+" || op == "-" || op == "*" || op == "/") && isNumeric!S) {
+        auto res = Matrix!(T, rows, cols)();
+
+        foreach (i; 0 .. v.length) {
+            res.v[i] = mixin("v[i] "~op~" s");
+        }
+
+        return res;
+    }
+
+    Matrix!(T, rows, cols) opOpAssign(string op, S)(S s) if ((op == "+" || op == "-" || op == "*" || op == "/") && isNumeric!S) {
+        this = opBinary!op(A);
+
+        return this;
+    }
 }
 
-unittest{
-    assert(mul([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]]) == [[58.0, 64.0], [139.0, 154.0]]);
-    assert(mul([3.0, 4.0, 2.0], [[13.0, 9.0, 7.0, 15.0], [8.0, 7.0, 4.0, 6.0], [6.0, 4.0, 0.0, 3.0]]) == [83.0, 63.0, 37.0, 75.0]);
-    assert(mul([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0], [10.0, 11.0, 12.0]], [-2.0, 1.0, 0.0]) == [0.0, -3.0, -6.0, -9.0]);
+alias Matrix!(double, 2, 2) Mat22d;
+alias Matrix!(double, 3, 3) Mat33d;
+alias Matrix!(double, 3, 4) Mat34d;
+alias Matrix!(double, 4, 4) Mat44d;
+alias Matrix!(double, 2, 1) Vec2d;
+alias Matrix!(double, 3, 1) Vec3d;
+alias Matrix!(double, 4, 1) Vec4d;
+
+unittest {
+    auto a = Mat33d([[1, 2, 3],
+                     [4, 5, 6],
+                     [7, 8, 9]]);
+    auto b = Vec3d([1, 2, 3]);
+
+    assert((a * b).v == [14, 32, 50]);
+    assert((a * a).v == [30, 66, 102, 36, 81, 126, 42, 96, 150]);
+    assert((a + a).v == [2, 8, 14, 4, 10, 16, 6, 12, 18]);
+    assert((a * 2).v == [2, 8, 14, 4, 10, 16, 6, 12, 18]);
+    assert((a / 2).v == [0.5, 2, 3.5, 1, 2.5, 4, 1.5, 3, 4.5]);
+    assert((a + 10).v == [11, 14, 17, 12, 15, 18, 13, 16, 19]);
+
+    a += a;
+    assert(a.v == [2, 8, 14, 4, 10, 16, 6, 12, 18]);
+
+    a -= a;
+    assert(a.v == [0, 0, 0, 0, 0, 0, 0, 0, 0]);
 }
